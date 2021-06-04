@@ -22,13 +22,13 @@ I will show Azure CLI commands using `bash`, but you can adapt this to any shell
 
 1. Clone this repository to your local machine, with `git clone <url-of-this-repo>`.
 
-2. cd to the downloaded repository
+2. `cd` to the downloaded repository
 
 ```bash
 cd R-custom-handler
 ```
 
-3. Launch R on your local machine, and verify that the `plumber`, `caret`, `httr` and `shiny` packages are installed (or install them if needed).
+1. Launch `R` on your local machine, and verify that the `plumber`, `caret`, `httr` and `shiny` packages are installed (or install them if needed).
 
 ```R
 > require(caret)
@@ -117,14 +117,38 @@ docker push $FR_DOCKER/accidentfunction:v1.0.0
 
 ## Deploy to Azure
 
-Now we're ready to deploy the container as an Azure Function. Run the CLI commands below to create the resources in a resource group called $FR_RG (as selected above). 
-
+Now we're ready to deploy the container as an Azure Function. Run the CLI commands below to create the resources in a resource group called `$FR_RG` (as selected above). 
 ```
 az group create --name $FR_RG --location $FR_LOC
 az storage account create --name $FR_STORAGE --location $FR_LOC --resource-group $FR_RG --sku Standard_LRS
 az functionapp plan create --resource-group $FR_RG --name myPremiumPlan --location $FR_LOC --number-of-workers 1 --sku EP1 --is-linux
 
 az functionapp create --functions-version 2 --name $FR_FUNCTION --storage-account $FR_STORAGE --resource-group $FR_RG --plan myPremiumPlan --runtime custom --deployment-container-image-name $FR_DOCKER/accidentfunction:v1.0.0
+
+storageConnectionString=$(az storage account show-connection-string --resource-group $FR_RG --name $FR_STORAGE --query connectionString --output tsv)
+az functionapp config appsettings set --name $FR_FUNCTION --resource-group $FR_RG --settings AzureWebJobsStorage=$storageConnectionString
+```
+
+### Alternativly: Using Azure Container Registry (ACR) instead of Docker Hub
+
+(Parameter 'registry_name' must conform to the following pattern: `^[a-zA-Z0-9]*$`)
+Retrieving credentials failed with an exception:'Failed to retrieve container registry credentials. Please either provide the credentials or run 'az acr update -n acrrfunc --admin-enabled true' to enable admin first.'
+
+```
+FR_ACR="acr-rfunc"
+az group create --name $FR_RG --location $FR_LOC
+
+az acr create --resource-group $FR_RG --name $FR_ACR --sku Basic # create and login to an ACR
+az acr login --name $FR_ACR 
+
+docker tag $FR_DOCKER/accidentfunction:v1.0.0 $FR_ACR.azurecr.io/accidentfunction:v1.0.0 # prepare docker image and upload
+docker push acrrfunc.azurecr.io/accidentfunction:v1.0.0  
+az acr repository list -n $FR_ACR
+
+az storage account create --name $FR_STORAGE --location $FR_LOC --resource-group $FR_RG --sku Standard_LRS
+az functionapp plan create --resource-group $FR_RG --name myPremiumPlan --location $FR_LOC --number-of-workers 1 --sku EP1 --is-linux
+az acr update -n acrrfunc --admin-enabled true # enable upload on ACR
+az functionapp create --functions-version 2 --name $FR_FUNCTION --storage-account $FR_STORAGE --resource-group $FR_RG --plan myPremiumPlan --runtime custom --deployment-container-image-name $FR_ACR.azurecr.io/accidentfunction:v1.0.0
 
 storageConnectionString=$(az storage account show-connection-string --resource-group $FR_RG --name $FR_STORAGE --query connectionString --output tsv)
 az functionapp config appsettings set --name $FR_FUNCTION --resource-group $FR_RG --settings AzureWebJobsStorage=$storageConnectionString
